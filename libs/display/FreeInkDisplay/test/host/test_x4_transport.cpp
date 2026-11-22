@@ -101,6 +101,16 @@ int main() {
   matched.busy = true; clockNow = 1122; m.poll(0);
   matched.busy = false; clockNow = 1130;
   assert(m.poll(0) == T::Result::Complete && m.status() == T::Status::Off);
+  assert(m.powerOn(0));
+  assert(reg(0x00) == 0x17 && matched.writes.back().cmd == 0x04);
+  freeink::EpdBus padded;
+  T h(padded); h.reset(); h.powerOn(0);
+  padded.busy=true; h.poll(1); padded.busy=false; h.poll(2);
+  assert(h.upload(0x13,{data.data(),data.size()},{0,0,800,480},255));
+  const auto& full=padded.writes[padded.writes.size()-3].data;
+  assert(full.size()==60000);
+  for(size_t i=0;i<12000;++i) assert(full[i]==255);
+  assert(std::equal(data.begin(),data.end(),full.begin()+12000));
   m.clearTrace(); assert(m.traceSize() == 0);
   std::cout << "transport: command order, full-line restore, gate offset, "
                "packing, timeouts, wrap, sleep passed\n";

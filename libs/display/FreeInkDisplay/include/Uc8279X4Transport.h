@@ -52,9 +52,7 @@ class Uc8279X4Transport {
     record(Event::Reset, 0);
     bus_.reset(50);
     bytes(0x00, {0x37, 0x4D});
-    bytes(0x61, {0x03, 0x20, 0x02, 0x58});
-    bytes(0x65, {0, 0, 0, 0});
-    bytes(0x03, {0x20});
+    geometry();
     bytes(0x30, {0x0E});
     bytes(0xE1, {0x02});
     bytes(0xE0, {0x02});
@@ -65,10 +63,16 @@ class Uc8279X4Transport {
   }
   bool powerOn(uint32_t now) {
     if (status_ != Status::Off) return false;
+    // Cold external-LUT mode must not bypass the panel's OTP startup path.
+    // Select OTP while PON loads panel defaults; activate() switches to the
+    // external bank only after power-on completion. No display refresh here.
+    bytes(0x00, {0x17, 0x4D});
+    configure(false);
     issue(0x04, Status::PoweringOn, now);
     return true;
   }
-  bool upload(uint8_t command, Plane plane, Window uploadWindow) {
+  bool upload(uint8_t command, Plane plane, Window uploadWindow,
+              uint8_t hiddenGateFill = 0) {
     if (status_ != Status::Ready || (command != 0x10 && command != 0x13) ||
         plane.data == nullptr || plane.size != 48000 || !valid(uploadWindow) ||
         (uploadWindow.x % 8) || (uploadWindow.width % 8))
@@ -86,7 +90,7 @@ class Uc8279X4Transport {
     // One internal-RAM staging row keeps PSRAM out of SPI driver constraints.
     std::array<uint8_t, 100> row{};
     if (full) {
-      row.fill(0);  // selector 00 in unbonded gates; never visible
+      row.fill(hiddenGateFill);  // B/W: white like driver; AA: selector 00
       for (uint16_t y = 0; y < 120; ++y)
         transaction.writeBytes(row.data(), 100);
       uploaded_ += 12000;
@@ -166,6 +170,13 @@ class Uc8279X4Transport {
     }
     if (asserted_ && !busy) {
       record(Event::BusyOff, activeCommand_, elapsed);
+      if (status_ == Status::PoweringOn) {
+        // PON can reload module defaults. Restore addressing and polarity
+        // BEFORE either DTM upload, not only immediately before DRF.
+        bytes(0x00, {0x17, 0x4D});
+        geometry();
+        configure(false);
+      }
       if (status_ == Status::PoweringOff)
         status_ = Status::Off;
       else
@@ -188,6 +199,11 @@ class Uc8279X4Transport {
   }
 
  private:
+  void geometry() {
+    bytes(0x61, {0x03, 0x20, 0x02, 0x58});
+    bytes(0x65, {0, 0, 0, 0});
+    bytes(0x03, {0x20});
+  }
   void configure(bool partial, bool fastTemperature = false) {
     bytes(0x50, {uint8_t(partial ? 0xD7 : 0x97)});
     bytes(0x30, {0x0E});
