@@ -65,6 +65,19 @@
 #endif
 
 namespace freeink {
+EpdBus* FreeInkDisplay::beginControllerSession() {
+  if (_controllerSession) return nullptr;
+  waitRefreshComplete();
+  _controllerSession = true;
+  return &_bus;
+}
+void FreeInkDisplay::endControllerSession() {
+  if (!_controllerSession) return;
+  _controllerSession = false;
+  _driver->begin(_bus);
+  _driver->requestResync(1);
+}
+
 namespace {
 RefreshMode toInternal(FreeInkDisplay::RefreshMode m) {
   switch (m) {
