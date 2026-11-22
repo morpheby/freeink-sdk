@@ -48,6 +48,9 @@ class PanelDriver {
   // --- lifecycle ---
   virtual void begin(EpdBus& bus) = 0;
   virtual void deepSleep(EpdBus& bus) = 0;
+  // Optional raw-controller lease boundary. Return true only with pumps off;
+  // do not infer readiness from a BUSY pin whose deep-sleep level is undefined.
+  virtual bool prepareControllerSession(EpdBus&) { return false; }
 
   // --- core paint path (load RAM + refresh) ---
   virtual void display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) = 0;

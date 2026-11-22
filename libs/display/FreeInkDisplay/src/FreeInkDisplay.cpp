@@ -70,8 +70,7 @@ EpdBus* FreeInkDisplay::beginControllerSession() {
   waitRefreshComplete();
   // Let the current owner shut down its pumps before the borrower resets the
   // controller. Waiting for DRF alone leaves a powered, retained controller.
-  _driver->deepSleep(_bus);
-  if (_bus.isBusy()) return nullptr;
+  if (!_driver->prepareControllerSession(_bus)) return nullptr;
   _controllerSession = true;
   return &_bus;
 }

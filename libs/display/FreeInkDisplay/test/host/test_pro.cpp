@@ -619,13 +619,28 @@ static void testControllerLeaseShutdown() {
   driver._isScreenOn = true;
   auto* bus = display.beginControllerSession();
   assert(bus == &display._bus && !driver._isScreenOn);
-  assert(bus->writes.size() == 2);
-  assert(bus->writes[0].command == 0x02 && bus->writes[1].command == 0x07);
+  assert(bus->writes.size() == 1);
+  assert(bus->writes[0].command == 0x02);
   assert(bus->waits == 1);  // power-off completed before lending the bus
-  assert(!display.beginControllerSession() && bus->writes.size() == 2);
+  assert(!display.beginControllerSession() && bus->writes.size() == 1);
   display.endControllerSession();
   assert(!display.controllerSessionActive() && driver._needFullClear);
   assert(!driver._oldPlaneValid && !driver._isScreenOn);
+  bus->clear();
+  bus->busy = true;
+  // The owner already shut down: sleeping BUSY must not prevent safe reset.
+  assert(display.beginControllerSession() == bus && bus->writes.empty());
+  bus->busy = false;
+  display.endControllerSession();
+  bus->clear();
+  driver._isScreenOn = true;
+  bus->busy = true;
+  assert(!display.beginControllerSession());
+  assert(driver._isScreenOn && !display.controllerSessionActive());
+  assert(bus->writes.size() == 1 && bus->writes[0].command == 0x02);
+  bus->busy = false;
+  assert(display.beginControllerSession() == bus);
+  display.endControllerSession();
   display._driver = nullptr;
   free(driver._grayBase);
 }

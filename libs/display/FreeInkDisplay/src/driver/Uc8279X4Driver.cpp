@@ -537,6 +537,16 @@ void Uc8279X4Driver::requestResync(uint8_t settlePasses) {
 
 void Uc8279X4Driver::skipInitialResync() { _needFullClear = false; }
 
+bool Uc8279X4Driver::prepareControllerSession(EpdBus& bus) {
+  // Already-off includes deep sleep, where BUSY need not advertise idle.
+  if (!_isScreenOn) return true;
+  bus.cmd(CMD_POWER_OFF);
+  bus.waitBusy(" 8279x4 lease power-off");
+  if (bus.isBusy()) return false;
+  _isScreenOn = false;
+  return true;
+}
+
 void Uc8279X4Driver::deepSleep(EpdBus& bus) {
   _directGrayOnPanel = false;
   _grayImagePass = false;
