@@ -14,12 +14,19 @@ int main() {
   assert(t.poll(2) == T::Result::Pending);
   b.busy = false;
   assert(t.poll(3) == T::Result::Complete);
-  std::vector<uint8_t> data(48000, 0xA5);
+  std::vector<uint8_t> data(48000);
+  for (size_t i = 0; i < data.size(); ++i) data[i] = uint8_t(i / 100 + i % 100);
   assert(!t.upload(0x13, {data.data(), 4}, {0, 0, 800, 480}));
   assert(t.upload(0x10, {data.data(), data.size()}, {0, 0, 800, 480}));
   assert(b.bytes == 60000);
   assert(t.upload(0x13, {data.data(), data.size()}, {496, 90, 272, 40}));
   assert(b.bytes == 61360);
+  const auto& packed = b.writes[b.writes.size() - 3].data;
+  assert(packed.size() == 1360);
+  for (size_t y = 0; y < 40; ++y)
+    for (size_t x = 0; x < 34; ++x)
+      assert(packed[y * 34 + x] == data[(90 + y) * 100 + 62 + x]);
+
   T::Luts l{};
   assert(!t.activate(l, {496, 90, 272, 40}, true, 4));
   assert(t.activate(l, {0, 90, 800, 40}, true, 4));

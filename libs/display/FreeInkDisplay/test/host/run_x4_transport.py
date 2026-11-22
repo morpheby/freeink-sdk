@@ -14,7 +14,7 @@ bool busy=false;uint32_t bytes=0;
 void reset(uint16_t){} void cmd(uint8_t c){writes.push_back({c,{}});}
 void data(uint8_t v){writes.back().data.push_back(v);}
 void data(const uint8_t*p,uint16_t n){for(uint16_t i=0;i<n;++i)data(p[i]);}
-struct Transaction { EpdBus& bus; void writeBytes(const uint8_t*,uint16_t n){bus.bytes+=n;} void end(){} };
+struct Transaction { EpdBus& bus; void writeBytes(const uint8_t*p,uint16_t n){bus.bytes+=n;bus.writes.back().data.insert(bus.writes.back().data.end(),p,p+n);} void end(){} };
 Transaction beginTxn(){return {*this};}
 bool isBusy()const{return busy;}
 }; }
