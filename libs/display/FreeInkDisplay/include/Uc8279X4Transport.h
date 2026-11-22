@@ -37,20 +37,20 @@ class Uc8279X4Transport {
     const bool full = uploadWindow.x == 0 && uploadWindow.y == 0 &&
                       uploadWindow.width == 800 && uploadWindow.height == 480;
     if (full) bus_.cmd(0x92); else window(uploadWindow);
-    bus_.cmd(command); bus_.beginTxn();
+    bus_.cmd(command); auto transaction = bus_.beginTxn();
     // One internal-RAM staging row keeps PSRAM out of SPI driver constraints.
     std::array<uint8_t, 100> row{};
     if (full) {
       row.fill(0);  // selector 00 in unbonded gates; never visible
-      for (uint16_t y = 0; y < 120; ++y) bus_.rawWriteBytes(row.data(), 100);
+      for (uint16_t y = 0; y < 120; ++y) transaction.writeBytes(row.data(), 100);
       uploaded_ += 12000;
     }
     const uint16_t count = uploadWindow.width / 8;
     for (uint16_t y = uploadWindow.y; y < uploadWindow.y + uploadWindow.height; ++y) {
       for (uint16_t x = 0; x < count; ++x) row[x] = plane.data[y * 100 + uploadWindow.x / 8 + x];
-      bus_.rawWriteBytes(row.data(), count); uploaded_ += count;
+      transaction.writeBytes(row.data(), count); uploaded_ += count;
     }
-    bus_.endTxn(); bus_.cmd(0x11); bus_.cmd(0x92);
+    transaction.end(); bus_.cmd(0x11); bus_.cmd(0x92);
     return true;
   }
   bool activate(const Luts& luts, Window refreshWindow, bool verticalValidated, uint32_t now) {
