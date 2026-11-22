@@ -159,7 +159,8 @@ class FreeInkDisplay {
 
   // Exclusive raw-controller session. The caller owns display scheduling until
   // endControllerSession(); no ordinary display API may run inside this lease.
-  // Always drains pending work before handing out the borrowed bus.
+  // Drains pending work and shuts the current driver down before lending the
+  // bus. The borrower must reset it on entry and power it off before release.
   EpdBus* beginControllerSession();
   void endControllerSession();
   bool controllerSessionActive() const { return _controllerSession; }

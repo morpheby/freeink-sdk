@@ -4,6 +4,8 @@
 #include <iostream>
 #include <vector>
 using T = freeink::Uc8279X4Transport;
+uint32_t clockNow;
+uint32_t clockRead() { return clockNow; }
 int main() {
   freeink::EpdBus b;
   T t(b);
@@ -61,6 +63,45 @@ int main() {
   b.busy = false;
   assert(t.sleep());
   assert(!t.powerOn(0));
+  freeink::EpdBus matched;
+  T m(matched, clockRead);
+  clockNow = 100;
+  m.reset();
+  assert(m.powerOn(0));  // the supplied time can predate a long RAM upload
+  matched.busy = true; clockNow = 102; m.poll(0);
+  matched.busy = false; clockNow = 110; m.poll(0);
+  assert(m.activate(l, {0,0,800,480}, false, 0, true));
+  auto reg = [&](uint8_t cmd) {
+    for (auto i = matched.writes.rbegin(); i != matched.writes.rend(); ++i)
+      if (i->cmd == cmd && !i->data.empty()) return i->data[0];
+    return uint8_t(0);
+  };
+  assert(reg(0x50) == 0x97 && reg(0xE0) == 2 && reg(0xE5) == 0x1E);
+  assert(reg(0x00) == 0x37);
+  matched.busy = true; clockNow = 112; m.poll(0);
+  matched.busy = false; clockNow = 120; m.poll(0);
+  assert(m.activateOtp(false, 0));
+  assert(reg(0x50) == 0x97 && reg(0xE0) == 2 && reg(0xE5) == 0x1E);
+  assert(reg(0x00) == 0x17);
+  bool asserted = false, released = false;
+  for (size_t i = 0; i < m.traceSize(); ++i) {
+    const auto& e = m.traceEvent(i);
+    if (e.command == 0x12 && e.event == T::Event::BusyOn)
+      asserted |= e.at == 112 && e.detail == 2;
+    if (e.command == 0x12 && e.event == T::Event::BusyOff)
+      released |= e.at == 120 && e.detail == 10;
+  }
+  assert(asserted && released);
+  clockNow = 1120;
+  assert(m.poll(0) == T::Result::AssertionTimeout);
+  matched.busy = true;
+  assert(!m.powerOff(0));
+  matched.busy = false;
+  assert(m.powerOff(0));  // safe shutdown attempt, never an implicit reset
+  matched.busy = true; clockNow = 1122; m.poll(0);
+  matched.busy = false; clockNow = 1130;
+  assert(m.poll(0) == T::Result::Complete && m.status() == T::Status::Off);
+  m.clearTrace(); assert(m.traceSize() == 0);
   std::cout << "transport: command order, full-line restore, gate offset, "
                "packing, timeouts, wrap, sleep passed\n";
 }

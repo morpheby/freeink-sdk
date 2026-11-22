@@ -612,6 +612,24 @@ static void testMetalio() {
   assert(lastRegister(bus, 0x10) == 0x03);
 }
 
+static void testControllerLeaseShutdown() {
+  FreeInkDisplay display(1,2,3,4,5,6);
+  Uc8279X4Driver driver;
+  display._driver = &driver;
+  driver._isScreenOn = true;
+  auto* bus = display.beginControllerSession();
+  assert(bus == &display._bus && !driver._isScreenOn);
+  assert(bus->writes.size() == 2);
+  assert(bus->writes[0].command == 0x02 && bus->writes[1].command == 0x07);
+  assert(bus->waits == 1);  // power-off completed before lending the bus
+  assert(!display.beginControllerSession() && bus->writes.size() == 2);
+  display.endControllerSession();
+  assert(!display.controllerSessionActive() && driver._needFullClear);
+  assert(!driver._oldPlaneValid && !driver._isScreenOn);
+  display._driver = nullptr;
+  free(driver._grayBase);
+}
+
 int main(int argc, char** argv) {
   if (argc > 1 && std::strcmp(argv[1], "metalio") == 0) {
     testMetalio();
@@ -624,6 +642,7 @@ int main(int argc, char** argv) {
     return 0;
   }
   testUc8179GrayShadeSplit();
+  testControllerLeaseShutdown();
   testUc8279X4WaveformSelection();
   testDirectSleep<Uc8179Driver>();
   testDirectSleep<Uc8279X4Driver>();
