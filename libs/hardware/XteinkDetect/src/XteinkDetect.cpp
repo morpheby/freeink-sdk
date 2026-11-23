@@ -49,6 +49,7 @@ XteinkDisplayProbeDiag g_probeDiag;
 #if FREEINK_CAPTURE_PANEL_MTP
 uint8_t g_panelMtp[4096] = {};
 bool g_panelMtpVerified = false;
+uint8_t g_panelTemperatureRaw[2] = {0xFF, 0xFF};
 #endif
 
 inline void epdClockDelay() { delayMicroseconds(1); }  // ~500 kHz, timing-safe
@@ -80,7 +81,7 @@ uint8_t epdReadByte(const EpdProbePins& p) {
 
 // One command + N-byte half-duplex read: command with DC low, then SDA (our
 // MOSI) released to input with DC high while the controller drives the reads.
-void epdCmdRead(const EpdProbePins& p, uint8_t cmd, uint8_t* out, uint8_t len) {
+void epdCmdRead(const EpdProbePins& p, uint8_t cmd, uint8_t* out, uint8_t len, uint8_t conversionMs = 0) {
   pinMode(p.mosi, OUTPUT);
   digitalWrite(p.dc, LOW);
   digitalWrite(p.cs, LOW);
@@ -89,6 +90,7 @@ void epdCmdRead(const EpdProbePins& p, uint8_t cmd, uint8_t* out, uint8_t len) {
   digitalWrite(p.dc, HIGH);
   pinMode(p.mosi, INPUT_PULLUP);
   epdClockDelay();
+  if (conversionMs) delay(conversionMs);
   for (uint8_t i = 0; i < len; i++) out[i] = epdReadByte(p);
   digitalWrite(p.cs, HIGH);
   pinMode(p.mosi, OUTPUT);
@@ -317,6 +319,7 @@ DisplayControllerVerdict probeDisplayController(const EpdProbePins& p, uint8_t v
   g_probeDiag.mtpValid = false;
 #if FREEINK_CAPTURE_PANEL_MTP
   g_panelMtpVerified = false;
+  g_panelTemperatureRaw[0] = g_panelTemperatureRaw[1] = 0xFF;
 #endif
 
   // Ground-truth dump of the module's factory configuration: RMTP (0xA2)
@@ -364,8 +367,11 @@ DisplayControllerVerdict probeDisplayController(const EpdProbePins& p, uint8_t v
     }
   }
 #if FREEINK_CAPTURE_PANEL_MTP && FREEINK_DEVICE_X4PRO
-  if (confirmed && BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Pro)
+  if (confirmed && BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Pro) {
     g_panelMtpVerified = capturePanelMtp(p);
+    if (g_panelMtpVerified && g_probeDiag.ver[2] == 0x68)
+      epdCmdRead(p, 0x40, g_panelTemperatureRaw, 2, 25);  // TSC, before SPI ownership
+  }
 #endif
   releaseDisplayPins(p);
 
@@ -396,7 +402,13 @@ const XteinkDisplayProbeDiag& getXteinkDisplayProbeDiag() { return g_probeDiag; 
 
 XteinkPanelMtpSnapshot getXteinkPanelMtpSnapshot() {
 #if FREEINK_CAPTURE_PANEL_MTP
-  return {g_panelMtp, sizeof(g_panelMtp), g_panelMtpVerified};
+  const int sample = static_cast<int8_t>(g_panelTemperatureRaw[0]);
+  // Reject common idle/floating patterns. Readback is experimental until
+  // checked against a physical temperature; expose the raw bytes as well.
+  const bool plausible = g_panelMtpVerified && sample >= -25 && sample <= 50 &&
+                         sample != 0 && g_panelTemperatureRaw[0] != 0xFF;
+  return {g_panelMtp, sizeof(g_panelMtp), g_panelMtpVerified,
+          plausible ? sample : -128, {g_panelTemperatureRaw[0], g_panelTemperatureRaw[1]}};
 #else
   return {nullptr, 0, false};
 #endif

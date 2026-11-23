@@ -107,6 +107,8 @@ struct XteinkPanelMtpSnapshot {
   const uint8_t* data;
   size_t size;
   bool verified;
+  int temperatureC = -128;  // no plausible boot sample
+  uint8_t temperatureRaw[2] = {0xFF, 0xFF};
 };
 XteinkPanelMtpSnapshot getXteinkPanelMtpSnapshot();
 

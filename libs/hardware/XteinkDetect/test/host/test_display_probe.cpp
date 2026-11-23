@@ -98,9 +98,10 @@ int main() {
   mtp.resize(4097);
   for (size_t i = 1; i < mtp.size(); ++i) mtp[i] = uint8_t(i * 37);
   mtp[1] = 0xA5;
+  replies[0x40] = {18, 0};
   assert(detectXteinkDisplayController() == V::Uc81xxConfirmed);
   const auto captured = getXteinkPanelMtpSnapshot();
-  assert(captured.verified && captured.size == 4096);
+  assert(captured.verified && captured.size == 4096 && captured.temperatureC == 18);
   for (size_t i = 0; i < captured.size; ++i) assert(captured.data[i] == mtp[i + 1]);
   const size_t commandCount = commands.size();
   assert(getXteinkPanelMtpSnapshot().data == captured.data);

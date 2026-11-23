@@ -55,6 +55,7 @@ class Uc8279X4Transport {
     requestedPower_ = profile;
     requestedPowerMode_ = mode <= 2 ? mode : 0;
   }
+  void setCalibrationTemperature(int temperatureC) { temperatureC_ = temperatureC; }
   uint8_t activePowerMode() const { return activePowerMode_; }
   void reset() {
     record(Event::Reset, 0);
@@ -231,7 +232,7 @@ class Uc8279X4Transport {
     bytes(0xE0, {0x02});
     // External AA keeps the temperature setting used after full OTP prep;
     // its established CDI does not imply the OTP fast-temperature shortcut.
-    bytes(0xE5, {uint8_t(fastTemperature ? 0x5A : 0x1E)});
+    bytes(0xE5, {uint8_t(fastTemperature ? 0x5A : temperatureC_)});
   }
   static bool valid(Window r) {
     return r.width && r.height && r.x < 800 && r.y < 480 &&
@@ -272,6 +273,7 @@ class Uc8279X4Transport {
   }
   EpdBus& bus_;
   Uc8279X4PanelPower requestedPower_{}, activePower_{};
+  int temperatureC_{30};
   uint8_t requestedPowerMode_{0}, activePowerMode_{0};
   Clock clock_;
   std::array<TraceEvent, 96> trace_{};

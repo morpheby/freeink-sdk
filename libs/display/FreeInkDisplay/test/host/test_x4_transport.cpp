@@ -124,6 +124,14 @@ int main() {
   std::array<uint8_t,9> header{9,0,0x78,0x78,0x14,0x24,0,0,0};
   const size_t table=0x33+4*0x121;
   std::copy(header.begin(),header.end(),mtp.begin()+table);
+  const size_t coolerTable = 0x33 + 3 * 0x121;
+  std::copy(header.begin(), header.end(), mtp.begin() + coolerTable);
+  mtp[coolerTable + 9 + 1] = 32;
+  auto cooler = freeink::observedX4FactoryProfile(mtp.data(),mtp.size(),true,0x68,20);
+  assert(cooler.power.valid && cooler.range == 3 && cooler.upperC == 20 &&
+         cooler.rows[0][1] == 32);
+  assert(freeink::observedX4FactoryProfile(mtp.data(),mtp.size(),true,0x68,21).range == 4);
+  assert(!freeink::observedX4FactoryProfile(mtp.data(),mtp.size(),true,0x68,90).power.valid);
   auto profile=freeink::observedX4PanelPower(mtp.data(),mtp.size(),true,0x68);
   assert(profile.valid && profile.pwr[0]==0x43 && profile.pwr[4]==0x14 &&
          profile.vcom==0x24 && profile.pll==9);
