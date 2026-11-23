@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "../src/bus/EpdBus.h"
+#include "Uc8279X4PanelPower.h"
 
 namespace freeink {
 // Raw electrical transport for the 800x480/600-gate X4 Pro only. Owns no image
@@ -48,6 +49,13 @@ class Uc8279X4Transport {
   }
   Status status() const { return status_; }
   uint32_t uploadedBytes() const { return uploaded_; }
+  // Request only; changes latch at the next OFF -> PON transition. Never
+  // change analogue settings underneath a live waveform or powered session.
+  void setPanelPower(Uc8279X4PanelPower profile, uint8_t mode) {
+    requestedPower_ = profile;
+    requestedPowerMode_ = mode <= 2 ? mode : 0;
+  }
+  uint8_t activePowerMode() const { return activePowerMode_; }
   void reset() {
     record(Event::Reset, 0);
     bus_.reset(50);
@@ -59,14 +67,26 @@ class Uc8279X4Transport {
     bytes(0xE5, {0x1E});
     bytes(0x50, {0x97});
     status_ = Status::Off;
+    activePowerMode_ = 0;
     uploaded_ = 0;
   }
   bool powerOn(uint32_t now) {
     if (status_ != Status::Off) return false;
-    // Cold external-LUT mode must not bypass the panel's OTP startup path.
-    // Select OTP while PON loads panel defaults; activate() switches to the
-    // external bank only after power-on completion. No display refresh here.
-    bytes(0x00, {0x17, 0x4D});
+    activePower_ = requestedPower_;
+    activePowerMode_ = activePower_.valid ? requestedPowerMode_ : 0;
+    bytes(0x00, {uint8_t(activePowerMode_ ? 0x37 : 0x17), 0x4D});
+    if (activePowerMode_) {
+      bus_.cmd(0x01);
+      bus_.data(activePower_.pwr.data(), activePower_.pwr.size());
+      record(Event::Write, 0x01);
+      bytes(0x82, {activePower_.vcom});
+      bus_.cmd(0x06);
+      bus_.data(activePower_.booster.data(), activePower_.booster.size());
+      record(Event::Write, 0x06);
+    }
+    // Legacy startup selects OTP during PON (insufficient by itself on the
+    // observed module). The explicit-power experiment instead uses REG=1,
+    // matching the recovered external-LUT startup, with its own power setup.
     configure(false);
     issue(0x04, Status::PoweringOn, now);
     return true;
@@ -117,7 +137,7 @@ class Uc8279X4Transport {
     // PON reloads settings: every activation reasserts them AFTER power-on.
     // Full B/W compares OTP and external banks with the same surrounding
     // setup. Candidate AA retains its established CDI. No invented analog
-    // voltages: PWR/VDCS/BTST continue to come from this panel's MTP.
+    // voltages. Optional experimental panel-power setup is applied before PON.
     configure(!fullBw);
     for (uint8_t i = 0; i < 5; ++i) {
       bus_.cmd(0x20 + i);
@@ -173,7 +193,7 @@ class Uc8279X4Transport {
       if (status_ == Status::PoweringOn) {
         // PON can reload module defaults. Restore addressing and polarity
         // BEFORE either DTM upload, not only immediately before DRF.
-        bytes(0x00, {0x17, 0x4D});
+        bytes(0x00, {uint8_t(activePowerMode_ ? 0x37 : 0x17), 0x4D});
         geometry();
         configure(false);
       }
@@ -206,7 +226,7 @@ class Uc8279X4Transport {
   }
   void configure(bool partial, bool fastTemperature = false) {
     bytes(0x50, {uint8_t(partial ? 0xD7 : 0x97)});
-    bytes(0x30, {0x0E});
+    bytes(0x30, {uint8_t(activePowerMode_ == 2 ? activePower_.pll : 0x0E)});
     bytes(0xE1, {0x02});
     bytes(0xE0, {0x02});
     // External AA keeps the temperature setting used after full OTP prep;
@@ -251,6 +271,8 @@ class Uc8279X4Transport {
     if (traceSize_ < trace_.size()) ++traceSize_;
   }
   EpdBus& bus_;
+  Uc8279X4PanelPower requestedPower_{}, activePower_{};
+  uint8_t requestedPowerMode_{0}, activePowerMode_{0};
   Clock clock_;
   std::array<TraceEvent, 96> trace_{};
   size_t traceHead_{0}, traceSize_{0};

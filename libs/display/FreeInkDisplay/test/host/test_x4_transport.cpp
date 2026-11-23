@@ -112,6 +112,48 @@ int main() {
   for(size_t i=0;i<12000;++i) assert(full[i]==255);
   assert(std::equal(data.begin(),data.end(),full.begin()+12000));
   m.clearTrace(); assert(m.traceSize() == 0);
+  // The opt-in power setup is sourced only from the verified known module.
+  // Reject changed headers, unverified data and other modules. No voltage
+  // payload is accepted from an unrecognized memory map.
+  std::array<uint8_t, 4096> mtp{};
+  mtp[0]=mtp[1]=0xA5; mtp[0x1A]=0x68;
+  mtp[11]=3; mtp[12]=0x20; mtp[13]=2; mtp[14]=0x58;
+  mtp[4]=0x25; mtp[5]=0x25; mtp[6]=0x3C;
+  std::array<uint8_t,8> boundaries{5,10,15,20,80,95,100,127};
+  std::copy(boundaries.begin(),boundaries.end(),mtp.begin()+0x28);
+  std::array<uint8_t,9> header{9,0,0x78,0x78,0x14,0x24,0,0,0};
+  const size_t table=0x33+4*0x121;
+  std::copy(header.begin(),header.end(),mtp.begin()+table);
+  auto profile=freeink::observedX4PanelPower(mtp.data(),mtp.size(),true,0x68);
+  assert(profile.valid && profile.pwr[0]==0x43 && profile.pwr[4]==0x14 &&
+         profile.vcom==0x24 && profile.pll==9);
+  assert(!freeink::observedX4PanelPower(mtp.data(),mtp.size(),false,0x68).valid);
+  assert(!freeink::observedX4PanelPower(mtp.data(),300,true,0x68).valid);
+  assert(!freeink::observedX4PanelPower(mtp.data(),mtp.size(),true,0x66).valid);
+  ++mtp[table+2];
+  assert(!freeink::observedX4PanelPower(mtp.data(),mtp.size(),true,0x68).valid);
+  freeink::EpdBus powered; T p(powered); p.reset();
+  p.setPanelPower(profile,1); powered.writes.clear(); assert(p.powerOn(0));
+  assert(powered.writes[0].cmd==0 && powered.writes[0].data[0]==0x37);
+  assert(powered.writes[1].cmd==1 && powered.writes[1].data==
+         (std::vector<uint8_t>{0x43,0,0x78,0x78,0x14}));
+  assert(powered.writes[2].cmd==0x82 && powered.writes[2].data[0]==0x24);
+  assert(powered.writes[3].cmd==6 && powered.writes[3].data==
+         (std::vector<uint8_t>{0x25,0x25,0x3C}));
+  assert(powered.writes.back().cmd==4 && p.activePowerMode()==1);
+  powered.busy=true; p.poll(1); powered.busy=false; p.poll(2);
+  auto powerPll=[&]() {
+    for(auto i=powered.writes.rbegin();i!=powered.writes.rend();++i) {
+      if(i->cmd==0x30) return i->data[0];
+    }
+    return uint8_t(0);
+  };
+  p.setPanelPower(profile,2);  // next PON only, not a live clock/voltage edit
+  assert(p.activate(l,{0,0,800,480},false,3,true));
+  assert(powerPll()==0x0E && p.activePowerMode()==1);
+  powered.busy=true; p.poll(4); powered.busy=false; p.poll(5);
+  assert(p.powerOff(6)); powered.busy=true; p.poll(7); powered.busy=false;p.poll(8);
+  assert(p.powerOn(9) && p.activePowerMode()==2 && powerPll()==9);
   std::cout << "transport: command order, full-line restore, gate offset, "
                "packing, timeouts, wrap, sleep passed\n";
 }

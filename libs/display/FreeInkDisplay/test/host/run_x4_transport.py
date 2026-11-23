@@ -5,6 +5,7 @@ HERE=Path(__file__).resolve().parent
 with tempfile.TemporaryDirectory() as d:
     root=Path(d);(root/'include').mkdir();(root/'src/bus').mkdir(parents=True)
     shutil.copy(HERE.parents[1]/'include/Uc8279X4Transport.h',root/'include')
+    shutil.copy(HERE.parents[1]/'include/Uc8279X4PanelPower.h',root/'include')
     (root/'src/bus/EpdBus.h').write_text('''#pragma once
 #include <cstdint>
 #include <vector>
