@@ -20,6 +20,7 @@
 // pinout — on an ESP32-S3 those are native USB D+ and the boot strap.
 
 #include <stdint.h>
+#include <stddef.h>
 
 namespace freeink {
 
@@ -97,6 +98,17 @@ struct XteinkDisplayProbeDiag {
   bool busyTimedOut = false;  // bounded stock X3 identification wait expired
 };
 const XteinkDisplayProbeDiag& getXteinkDisplayProbeDiag();
+
+// Optional read-only factory-memory capture, enabled by
+// FREEINK_CAPTURE_PANEL_MTP=1. Only a confirmed X4 Pro UltraChip is read, before
+// the SPI driver starts. Two full reads must agree, including the probe header.
+// The accessor never touches hardware. No MTP programming commands are used.
+struct XteinkPanelMtpSnapshot {
+  const uint8_t* data;
+  size_t size;
+  bool verified;
+};
+XteinkPanelMtpSnapshot getXteinkPanelMtpSnapshot();
 
 // Convenience: resolve which panel controller this unit carries and, when it is
 // the UltraChip sibling, promote BoardConfig::ACTIVE.displayController to it

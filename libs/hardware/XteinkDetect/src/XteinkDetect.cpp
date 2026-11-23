@@ -46,6 +46,10 @@ constexpr uint8_t UC81XX_CMD_RMTP = 0xA2;  // bulk MTP read: 1 dummy byte, then 
 // Diagnostics snapshot of the last probe (see XteinkDisplayProbeDiag in the
 // header). File-scope so locked-unit firmware can persist it after the fact.
 XteinkDisplayProbeDiag g_probeDiag;
+#if FREEINK_CAPTURE_PANEL_MTP
+uint8_t g_panelMtp[4096] = {};
+bool g_panelMtpVerified = false;
+#endif
 
 inline void epdClockDelay() { delayMicroseconds(1); }  // ~500 kHz, timing-safe
 
@@ -89,6 +93,35 @@ void epdCmdRead(const EpdProbePins& p, uint8_t cmd, uint8_t* out, uint8_t len) {
   digitalWrite(p.cs, HIGH);
   pinMode(p.mosi, OUTPUT);
 }
+
+#if FREEINK_CAPTURE_PANEL_MTP
+// Keep the 4 KiB capture in static storage, not on the MCU setup stack. Compare
+// the second stream byte by byte without allocating another 4 KiB buffer.
+bool capturePanelMtp(const EpdProbePins& p) {
+  bool same = true;
+  for (uint8_t pass = 0; pass < 2; ++pass) {
+    pinMode(p.mosi, OUTPUT);
+    digitalWrite(p.dc, LOW);
+    digitalWrite(p.cs, LOW);
+    epdClockDelay();
+    epdWriteByte(p, UC81XX_CMD_RMTP);
+    digitalWrite(p.dc, HIGH);
+    pinMode(p.mosi, INPUT_PULLUP);
+    epdClockDelay();
+    epdReadByte(p);  // documented RMTP dummy byte
+    for (size_t i = 0; i < sizeof(g_panelMtp); ++i) {
+      const uint8_t value = epdReadByte(p);
+      if (pass == 0) g_panelMtp[i] = value;
+      else if (g_panelMtp[i] != value) same = false;
+    }
+    digitalWrite(p.cs, HIGH);
+    pinMode(p.mosi, OUTPUT);
+  }
+  return same && g_probeDiag.mtpValid &&
+         memcmp(g_panelMtp, g_probeDiag.mtp, sizeof(g_probeDiag.mtp)) == 0 &&
+         g_panelMtp[0] == 0xA5;
+}
+#endif
 
 // The UC81xx VER signature: a leading reserved 0x00, then a CHIP_VER byte
 // (datasheet default 0x03, MTP-programmed so not pinned to that exact value)
@@ -282,6 +315,9 @@ DisplayControllerVerdict probeDisplayController(const EpdProbePins& p, uint8_t v
   g_probeDiag.flg = flg1;
   g_probeDiag.promoted = false;
   g_probeDiag.mtpValid = false;
+#if FREEINK_CAPTURE_PANEL_MTP
+  g_panelMtpVerified = false;
+#endif
 
   // Ground-truth dump of the module's factory configuration: RMTP (0xA2)
   // returns a dummy byte then MTP[0..n] — the 0xA5 refresh-enable key, the
@@ -327,6 +363,10 @@ DisplayControllerVerdict probeDisplayController(const EpdProbePins& p, uint8_t v
       }
     }
   }
+#if FREEINK_CAPTURE_PANEL_MTP && FREEINK_DEVICE_X4PRO
+  if (confirmed && BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Pro)
+    g_panelMtpVerified = capturePanelMtp(p);
+#endif
   releaseDisplayPins(p);
 
   if (verBytes) memcpy(verBytes, g_probeDiag.ver, 5);
@@ -353,6 +393,14 @@ DisplayControllerVerdict detectXteinkDisplayController(uint8_t verBytes[5], uint
 }
 
 const XteinkDisplayProbeDiag& getXteinkDisplayProbeDiag() { return g_probeDiag; }
+
+XteinkPanelMtpSnapshot getXteinkPanelMtpSnapshot() {
+#if FREEINK_CAPTURE_PANEL_MTP
+  return {g_panelMtp, sizeof(g_panelMtp), g_panelMtpVerified};
+#else
+  return {nullptr, 0, false};
+#endif
+}
 
 namespace {
 
@@ -547,6 +595,7 @@ const XteinkDisplayProbeDiag& getXteinkDisplayProbeDiag() {
   static const XteinkDisplayProbeDiag empty;
   return empty;
 }
+XteinkPanelMtpSnapshot getXteinkPanelMtpSnapshot() { return {nullptr, 0, false}; }
 
 #endif  // FREEINK_XTEINK_DISPLAY_PROBE
 

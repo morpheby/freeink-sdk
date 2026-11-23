@@ -18,6 +18,8 @@ std::vector<unsigned long> resets;
 std::vector<int> resetLevels;
 int command, commandBits, readBits, samples, holds;
 bool sampleHigh;
+bool corruptMtpRepeat;
+int mtpReads;
 auto pins = BoardConfig::XTEINK_X3.display;
 
 void reset(BoardConfig::Board board, std::vector<uint8_t> ver, bool high = true) {
@@ -26,13 +28,15 @@ void reset(BoardConfig::Board board, std::vector<uint8_t> ver, bool high = true)
   now = readyAt = 0;
   command = commandBits = readBits = samples = holds = 0;
   sampleHigh = high;
+  corruptMtpRepeat = false;
+  mtpReads = 0;
   levels.fill(HIGH);
   modes.fill(INPUT);
   commands.clear(); resets.clear(); resetLevels.clear();
   replies = {{0x70, ver}, {0x71, {0x13}}, {0xA2, std::vector<uint8_t>(49, 0)}};
 }
 
-void checkX3Wire() {
+[[maybe_unused]] void checkX3Wire() {
   assert(commands == std::vector<int>{0x70});
   assert(samples == 24);
   assert(resets == (std::vector<unsigned long>{0, 10, 60}));
@@ -57,7 +61,10 @@ void digitalWrite(int pin, int value) {
   if (pin == pins.sclk && value == HIGH && levels[pin] == LOW && levels[pins.cs] == LOW &&
       levels[pins.dc] == LOW && modes[pins.mosi] == OUTPUT) {
     command = (command << 1) | levels[pins.mosi];
-    if (++commandBits == 8) commands.push_back(command);
+    if (++commandBits == 8) {
+      commands.push_back(command);
+      if (command == 0xA2) ++mtpReads;
+    }
   }
   levels.at(pin) = value;
 }
@@ -70,6 +77,8 @@ int digitalRead(int pin) {
   const auto& data = replies.at(command);
   assert(static_cast<size_t>(readBits / 8) < data.size());
   int value = (data[readBits / 8] >> (7 - readBits % 8)) & 1;
+  if (corruptMtpRepeat && command == 0xA2 && mtpReads == 3 && readBits == 4096 * 8)
+    value ^= 1;
   ++readBits; ++samples;
   return value;
 }
@@ -81,6 +90,28 @@ int main() {
   using namespace freeink;
   using B = BoardConfig::Board;
   using V = DisplayControllerVerdict;
+#if FREEINK_DEVICE_X4PRO
+  // Full boot capture must include bytes beyond a uint8_t read length, match
+  // the original header, and be repeatable. Export access must be read-only.
+  reset(B::XteinkX4Pro, {0,0x0f,0x68,0,0}, false);
+  auto& mtp = replies[0xA2];
+  mtp.resize(4097);
+  for (size_t i = 1; i < mtp.size(); ++i) mtp[i] = uint8_t(i * 37);
+  mtp[1] = 0xA5;
+  assert(detectXteinkDisplayController() == V::Uc81xxConfirmed);
+  const auto captured = getXteinkPanelMtpSnapshot();
+  assert(captured.verified && captured.size == 4096);
+  for (size_t i = 0; i < captured.size; ++i) assert(captured.data[i] == mtp[i + 1]);
+  const size_t commandCount = commands.size();
+  assert(getXteinkPanelMtpSnapshot().data == captured.data);
+  assert(commands.size() == commandCount && mtpReads == 3);
+  assert(modes[pins.mosi] == INPUT && modes[pins.cs] == INPUT_PULLUP);
+  corruptMtpRepeat = true;
+  mtpReads = 0;
+  assert(detectXteinkDisplayController() == V::Uc81xxConfirmed);
+  assert(!getXteinkPanelMtpSnapshot().verified);
+  std::puts("Verified full factory-memory capture checks passed");
+#else
   uint8_t ver[5] = {9,9,9,9,9}, flg = 9;
 
   reset(B::XteinkX3, {0,0,0x66});
@@ -128,6 +159,7 @@ int main() {
   assert(commands == (std::vector<int>{0x71,0x70,0x71,0x70,0xA2}));
   assert(getXteinkDisplayProbeDiag().verBytesRead == 5);
   assert(getXteinkDisplayProbeDiag().mtpValid);
+
   // Stock panel table IDs, including the BOE 4.28 glass (0x40 UC8179,
   // 0x41/0x42 UC8279 D/E).
   for (uint8_t id : {uint8_t(0x01), uint8_t(0x40)}) {
@@ -145,4 +177,5 @@ int main() {
   assert(detectXteinkDisplayController() == V::Uc81xxConfirmed);
   checkX3Wire();  // previous X4 MTP/status must not leak into the X3 snapshot
   std::puts("X3 stock protocol and X4 regression checks passed");
+#endif
 }

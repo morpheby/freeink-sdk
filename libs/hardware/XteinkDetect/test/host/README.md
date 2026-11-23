@@ -25,3 +25,9 @@ controller promotion, and unchanged X4 VER/FLG/MTP transactions.
 This verifies host protocol behavior, not the electrical behavior of a physical
 display. Test affected hardware with the new `[XTDET] X3 stock probe` log,
 including cold boots and sleep/wake.
+
+
+The same test file also supports `-DFREEINK_DEVICE_X4PRO=1
+-DFREEINK_CAPTURE_PANEL_MTP=1` instead of the C3 device flags. This checks a full
+4096-byte capture, matching header and second read, final-byte corruption
+rejection, and pin release. The snapshot accessor issues no bus commands.
