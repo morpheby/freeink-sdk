@@ -68,6 +68,22 @@
 #endif
 
 namespace freeink {
+EpdBus* FreeInkDisplay::beginControllerSession() {
+  if (_controllerSession || !_driver) return nullptr;
+  waitRefreshComplete();
+  // Let the current owner shut down its pumps before the borrower resets the
+  // controller. Waiting for DRF alone leaves a powered, retained controller.
+  if (!_driver->prepareControllerSession(_bus)) return nullptr;
+  _controllerSession = true;
+  return &_bus;
+}
+void FreeInkDisplay::endControllerSession() {
+  if (!_controllerSession) return;
+  _controllerSession = false;
+  _driver->begin(_bus);
+  _driver->requestResync(1);
+}
+
 namespace {
 RefreshMode toInternal(FreeInkDisplay::RefreshMode m) {
   switch (m) {

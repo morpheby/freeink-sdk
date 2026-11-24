@@ -167,6 +167,14 @@ class FreeInkDisplay {
   void cleanupGrayscaleWithPreviousBuffer();
 #endif
 
+  // Exclusive raw-controller session. The caller owns display scheduling until
+  // endControllerSession(); no ordinary display API may run inside this lease.
+  // Drains pending work and shuts the current driver down before lending the
+  // bus. The borrower must reset it on entry and power it off before release.
+  EpdBus* beginControllerSession();
+  void endControllerSession();
+  bool controllerSessionActive() const { return _controllerSession; }
+
   void displayBuffer(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
 
   // Non-blocking refresh: pushes the frame, starts the panel waveform, and
@@ -442,6 +450,7 @@ class FreeInkDisplay {
   RefreshMode resolveReleasedMode(RefreshMode mode) const;
 #endif
 
+  bool _controllerSession = false;
   EpdBus _bus;
   PanelDriver* _driver = nullptr;
 
