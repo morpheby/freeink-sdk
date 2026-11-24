@@ -1435,6 +1435,10 @@ component set:
 
 ## Recent additions
 
+- **`ListItem::valueIcon`** — a pointer to a `BitmapRef` status mark in the
+  value slot, drawn in the row's foreground ink so it inverts when selected.
+  Used only when neither `toggle` nor `value` is set; on the left in RTL lists.
+  The bitmap must outlive the `list()` call.
 - **`flatButtonStyles(radius)`** — the borderless sibling of
   `outlinedButtonStyles`: nothing drawn at rest, a light fill for
   selected/pressed feedback. Assign once (`theme.button =
@@ -1662,3 +1666,25 @@ widest natural tab. Slot bounds include the tab insets, and touch targets and
 selection indicators follow the slots. A single tab is centered. If the slots
 and minimum `gap` do not fit, the bar falls back to equal-width slots.
 Existing default layouts are unchanged. Neither option allocates memory.
+
+
+### Runtime composition and compact style overrides
+
+`FreeInkUILayout.h` supports fixed/flexible linear containers and equal-track
+runtime grids. Set `LayoutNode::kind = LayoutKind::Grid`, `columns`, and `rows`;
+children carry zero-based `column`/`row` and positive spans. Spanned rectangles
+include internal gaps. Grid children may themselves be linear containers. Layout
+is allocation-free and uses 32-bit intermediate coordinates. Callers validate
+configuration; invalid/out-of-bounds placements produce no slot.
+
+`FreeInkUIComponentStyle.h` supplies compact text and state-box overrides with
+explicit presence masks. Applying false, zero, or transparent replaces the
+inherited value; absent fields preserve it. `Screen::setComponentStyle` borrows
+screen-lifetime storage, applies overrides to list typography/state styles and
+headers, and supports alignment of list blocks that fit the viewport (including wrapped rows).
+The style pointer defaults to null, preserving existing callers. Layout owners
+apply `padding` to their content bounds before routing and drawing.
+
+`fitCoverGrid` computes fitting cover/row dimensions from the existing grid
+properties, available rectangle, line height and maximum cover height. It leaves
+text line-count policy to the caller and allocates no buffers.

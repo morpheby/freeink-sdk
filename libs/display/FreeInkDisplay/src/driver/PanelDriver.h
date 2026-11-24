@@ -33,6 +33,10 @@ class PanelDriver {
  public:
   virtual ~PanelDriver() = default;
 
+  // Stable controller/backend identity, independent of board defaults.
+  // Custom drivers may leave it unavailable instead of reporting a guessed name.
+  virtual const char* controllerName() const { return nullptr; }
+
   // --- bus configuration (consumed by the facade before begin()) ---
   virtual uint32_t spiHz() const = 0;
   virtual BusyPolarity busyPolarity() const = 0;
@@ -51,6 +55,10 @@ class PanelDriver {
   // Optional raw-controller lease boundary. Return true only with pumps off;
   // do not infer readiness from a BUSY pin whose deep-sleep level is undefined.
   virtual bool prepareControllerSession(EpdBus&) { return false; }
+
+  // Called only after the host's complete frame (including grayscale) finishes.
+  // Retain controller RAM and the partial-refresh baseline; never reset/sleep.
+  virtual void powerOffBetweenFrames(EpdBus& bus) { (void)bus; }
 
   // --- core paint path (load RAM + refresh) ---
   virtual void display(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) = 0;
@@ -109,6 +117,11 @@ class PanelDriver {
     (void)buf;
   }
 
+  // Paint a B/W rectangle over the last absolute gray image, or restore it (fb == nullptr).
+  // Returns false without painting when no retained image is available. May repaint the full panel.
+  virtual bool displayRetainedGrayscaleOverlay(EpdBus& bus, const uint8_t* fb, uint16_t x, uint16_t y,
+                                               uint16_t w, uint16_t h) { return false; }
+
   // --- grayscale (dual-plane LSB/MSB) ---
   virtual GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const {
     (void)mode;
@@ -133,6 +146,13 @@ class PanelDriver {
   // their previous behavior.
   virtual void displayGrayscaleBase(EpdBus& bus, const uint8_t* fb, RefreshMode fallback, bool turnOff) {
     display(bus, fb, nullptr, fallback, turnOff);
+  }
+
+  // Starts an Overlay base without touching the framebuffer until displayFinish.
+  virtual bool supportsDeferredGrayscaleBase() const { return false; }
+  virtual bool displayGrayscaleBaseStart(EpdBus& bus, const uint8_t* fb, RefreshMode fallback, bool turnOff) {
+    beginGrayscale(bus, fb, GrayscaleMode::Overlay, fallback, turnOff);
+    return false;
   }
 
   // Mode is fixed before uploads; drivers may adapt the common host encoding.
@@ -196,6 +216,27 @@ class PanelDriver {
 
   // --- optional, controller-specific hooks (no-op by default) ---
   virtual void requestResync(uint8_t settlePasses) { (void)settlePasses; }
+  // True while the host presents book pages; drivers with a reading waveform use it.
+  virtual void setReaderRefresh(bool reading) { (void)reading; }
+  // True asks overlay passes for every gray level the masks carry, where a
+  // driver otherwise renders them with fewer levels in less time.
+  virtual void setOverlayFullTone(bool fullTone) { (void)fullTone; }
+  // One-shot host work to run while a page-turn waveform drives the panel,
+  // when the CPU would otherwise only poll BUSY. The hook lasts for exactly one
+  // display call: set it right before display() or displayGray(); a driver
+  // that takes it calls it at most once during that call, on the calling
+  // thread, after the waveform has started, and clears it before the call
+  // returns whether or not it ran. Not every refresh runs it.
+  // The hook must not touch the bus or the display, and must not write the
+  // display's frame buffer: it draws only into buffers of its own. It runs
+  // inside the display call, so with FreeInkDisplay's power-management lock
+  // held and with whatever locks the host holds around its display calls; a
+  // hook that takes one of those, or waits on something that does, deadlocks.
+  // Default: ignored, the hook never runs.
+  virtual void setRefreshIdleHook(void (*hook)(void* ctx), void* ctx) {
+    (void)hook;
+    (void)ctx;
+  }
   virtual void skipInitialResync() {}
   // Content-polarity hint: true while the facade is rendering inverted (dark
   // background) frames. Differential drivers idle unchanged pixels, so on a
@@ -204,6 +245,9 @@ class PanelDriver {
   // non-flashing. Drivers may use this to widen their drive set (re-blacken
   // the unchanged background each update) or bias their deghost direction.
   virtual void setBackgroundHint(bool darkBackground) { (void)darkBackground; }
+  // Overlay grayscale masks may follow an inverted B/W page. The masks keep
+  // their normal encoding; the facade inverts only B/W frames.
+  virtual bool grayscaleWhileInverted() const { return false; }
   // Capture the cancellation generation at the start of a logical UI render.
   // This must happen before CPU-side composition: input arriving while an old
   // frame is being composed must still cancel its optional post-refresh work.
